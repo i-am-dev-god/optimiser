@@ -31,8 +31,8 @@ const MAX_COUNT_LENGTH = 200_000;
 
 export function countWith(text: string, encoder: EncoderId): number {
   if (!text) return 0;
-  const safe = text.length > MAX_COUNT_LENGTH ? text.slice(0, MAX_COUNT_LENGTH) : text;
-  return ENCODERS[encoder](safe);
+  if (text.length > MAX_COUNT_LENGTH) throw new Error('Prompt exceeds the tokenizer limit of 200,000 characters.');
+  return ENCODERS[encoder](text);
 }
 
 export function measure(

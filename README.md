@@ -1,6 +1,11 @@
 # optimiser
 
-A local, deterministic prompt-refinement tool. Paste a prompt, choose a target model and response depth, and inspect the suggested rewrite, token counts, changes, and verification checks before copying it. Processing runs in the browser; the app does not send prompts to a server or an AI model.
+A browser prompt-refinement workbench with two explicitly separate modes:
+
+- **Rule-based optimizer:** deterministic cleanup and checks; it does not call an AI model. The model selector changes token accounting assumptions, not the engine. The UI does not add optional response-shaping directives.
+- **Browser AI rewrite:** calls the browser's built-in Prompt API language model, when available. It sends your prompt to that model on your device. The browser may need to download model files. Availability depends on browser version, device, configuration, and model support; the app reports unavailable rather than pretending inference occurred. The model used is determined by the browser, not the accounting selector.
+
+To test AI: open the site in a compatible browser with the Prompt API enabled, paste a prompt, check the Browser AI status, and click **Rewrite with browser AI**. A result appears only after the model's `prompt()` call returns. Compare it against the original; a successful call or a changed output does not prove semantic accuracy. An unchanged result can also be a valid rewrite. Unsupported browsers can use the clearly labeled rules mode, but cannot run AI through this feature.
 
 ## Run locally
 
@@ -11,14 +16,10 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. `npm test` runs the engine suite; `npm run build` type-checks and builds the production site; `npm run preview` serves that build.
+`npm test` runs the engine and integration tests. The browser AI integration tests use a mock; they do not verify real model availability, quality, or inference. `npm run build` type-checks and builds the production site. GitHub Actions builds and deploys to Pages when configured for GitHub Actions.
 
-## How it works
+## Accuracy and limits
 
-The pipeline recognizes and seals selected fragile spans, scans the remaining text for intent, depth and risk signals, applies conservative cleanup steps, routes a strategy, and verifies candidates against structural and preservation checks. Failed candidates fall back to less intrusive alternatives, including the original text. Cleanup steps that increase the selected encoder's token count are rejected. The X-Ray shows the decisions and checks; the diff is provided for manual review.
+Rule-based processing uses a vault, heuristic scanning and reversible transforms with verification checks and fallbacks. It cannot guarantee semantic equivalence, recognize every constraint, or adapt perfectly to outliers. AI rewriting is also fallible and is not covered by those rule-based checks. Always compare the output to the original, especially for consequential work.
 
-Token counts are calculated on the prompt text with the indicated BPE encoder, not API message framing or the model response. The OpenAI model selections use their matching encoder; other selections use a clearly labeled proxy and are not exact counts for those models. Prices are dated assumptions in `src/engine/pricing.ts`, not live quotes. A directive's break-even figure is the output-token reduction needed to offset its standalone input-token cost under those assumptions; it is not a prediction of actual savings, and context-sensitive tokenization can change the marginal cost.
-
-## Limits and responsible use
-
-Detection, routing and preservation checks use rules and fixed policy parameters, not an understanding of every possible prompt. They cannot guarantee semantic equivalence, detect every constraint, predict output quality or savings, or adapt perfectly to outliers. Carefully compare the result with the original, especially for code, legal, medical, financial or other consequential work. No model output or retry behavior is measured. Prices, model specifications and tokenizer support must be maintained as providers change them.
+Token counts use the named BPE encoder on prompt text only, excluding message framing and model responses. OpenAI selections use matching encoders; other models use clearly labeled proxies. Inputs over 200,000 characters are rejected rather than silently truncated. Prices in `src/engine/pricing.ts` are dated assumptions, not live quotes. Break-even numbers are conditional arithmetic, not predicted savings; context-sensitive tokenization can change marginal cost. AI inference cost or savings are not measured.

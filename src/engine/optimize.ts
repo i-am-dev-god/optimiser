@@ -20,6 +20,8 @@ export interface OptimizeOptions {
   readonly depth?: DepthSetting;
   readonly modelId?: string;
   readonly model?: ModelPricing;
+  /** Allow optional response-shaping instructions. */
+  readonly addDirective?: boolean;
 }
 
 /**
@@ -140,11 +142,11 @@ export function optimize(prompt: string, options: OptimizeOptions = {}): Optimiz
     {
       label: 'full strategy',
       headers: decision.strategy.structuralHeaders,
-      directive: Boolean(decision.strategy.directive),
+      directive: options.addDirective !== false && Boolean(decision.strategy.directive),
       surfaced: decision.strategy.constraintMode !== 'none',
     },
-    { label: 'without headers', headers: false, directive: Boolean(decision.strategy.directive), surfaced: decision.strategy.constraintMode !== 'none' },
-    { label: 'directive only', headers: false, directive: Boolean(decision.strategy.directive), surfaced: false },
+    { label: 'without headers', headers: false, directive: options.addDirective !== false && Boolean(decision.strategy.directive), surfaced: decision.strategy.constraintMode !== 'none' },
+    { label: 'directive only', headers: false, directive: options.addDirective !== false && Boolean(decision.strategy.directive), surfaced: false },
     { label: 'cleaned only', headers: false, directive: false, surfaced: false },
     { label: 'unchanged', headers: false, directive: false, surfaced: false },
   ].map((a) => ({ ...a, text: a.label === 'unchanged' ? prompt : assemble(a) }));
