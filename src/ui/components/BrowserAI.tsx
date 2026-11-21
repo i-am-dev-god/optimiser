@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { validateAi } from '../../engine/validateAi';
 
 type State = 'NOT_DOWNLOADED' | 'DOWNLOADING' | 'FAILED' | 'READY';
-type Message = { type: 'ready' | 'not-cached' | 'error' | 'progress' | 'result'; operation?: string; message?: string; file?: string; loaded?: number; total?: number; output?: string };
+type Message = { type: 'ready' | 'not-cached' | 'error' | 'progress' | 'result' | 'chunk'; text?: string; operation?: string; message?: string; file?: string; loaded?: number; total?: number; output?: string };
 export function BrowserAI({ prompt, source, onApply }: { prompt: string; source: string; onApply: (output: string, original: string) => void }) {
   const worker = useRef<Worker | null>(null);
   const pending = useRef('');
+  const currentPrompt = useRef(prompt);
+  currentPrompt.current = prompt;
+  const started = useRef(0);
+  const [epoch, setEpoch] = useState(0);
+  const [partial, setPartial] = useState('');
+  const [elapsed, setElapsed] = useState(0);
   const [state, setState] = useState<State>('NOT_DOWNLOADED');
   const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -18,13 +24,19 @@ export function BrowserAI({ prompt, source, onApply }: { prompt: string; source:
     catch { setChecking(false); setState('FAILED'); setMessage('This browser could not start a model worker.'); return; }
     worker.current = w;
     w.onmessage = (event: MessageEvent<Message>) => {
+      if (worker.current !== w) return;
       const m = event.data;
       if (m.type === 'ready') { setState('READY'); setChecking(false); setProgress(null); setMessage(''); }
       if (m.type === 'not-cached') { setState('NOT_DOWNLOADED'); setChecking(false); }
       if (m.type === 'progress' && m.file && m.total && m.loaded !== undefined) setProgress({ file: m.file, total: m.total, loaded: m.loaded });
       if (m.type === 'error') { setChecking(false); setBusy(false); if (m.operation !== 'rewrite') setState('FAILED'); setMessage(m.message || 'Local AI failed.'); }
+      if (m.type === 'chunk' && m.text) setPartial(value => value + m.text);
       if (m.type === 'result') {
-        setBusy(false);
+        setBusy(false); setPartial('');
+        if (pending.current !== currentPrompt.current) {
+          setMessage('The prompt changed while the AI was running. The outdated result was discarded; run Rewrite again.');
+          return;
+        }
         try {
           const reasons = validateAi(pending.current, m.output ?? '');
           if (reasons.length) {
@@ -36,17 +48,34 @@ export function BrowserAI({ prompt, source, onApply }: { prompt: string; source:
         } catch { setMessage('Could not validate the AI rewrite. The existing result is unchanged.'); }
       }
     };
-    w.onerror = () => { setChecking(false); setBusy(false); setState('FAILED'); setMessage('The model worker stopped. Reload the page to retry.'); worker.current = null; w.terminate(); };
+    w.onerror = () => { if (worker.current !== w) return; setChecking(false); setBusy(false); setState('FAILED'); setMessage('The model worker stopped. Reload the page to retry.'); worker.current = null; w.terminate(); };
     w.postMessage({ type: 'restore' });
     return () => { worker.current = null; w.terminate(); };
-  }, [onApply]);
+  }, [onApply, epoch]);
+  useEffect(() => {
+    if (!busy) return;
+    const timer = window.setInterval(() => setElapsed(Math.floor((performance.now() - started.current) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
   const enable = () => { if (!worker.current) { window.location.reload(); return; } setState('DOWNLOADING'); setMessage(''); setProgress(null); worker.current.postMessage({ type: 'load' }); };
-  const rewrite = () => { if (state !== 'READY' || busy || !prompt.trim() || !worker.current) return; pending.current = prompt; setBusy(true); setMessage(''); setReview(null); worker.current.postMessage({ type: 'rewrite', prompt: source }); };
+  const rewrite = () => { if (state !== 'READY' || busy || !prompt.trim() || !worker.current) return; pending.current = prompt; started.current = performance.now(); setElapsed(0); setPartial(''); setBusy(true); setMessage(''); setReview(null); worker.current.postMessage({ type: 'rewrite', prompt: source }); };
+  const cancel = () => {
+    worker.current?.terminate();
+    worker.current = null;
+    setBusy(false); setPartial(''); setChecking(true); setState('NOT_DOWNLOADED');
+    setMessage('Rewrite cancelled. The model will be reloaded from browser cache if available; your existing result is unchanged.');
+    setEpoch(value => value + 1);
+  };
   return <section className="panel mt-5 p-5 sm:p-6" aria-labelledby="ai-title">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="ai-title" className="font-semibold">AI Rewrite</h2><span className="chip" role="status">{checking ? 'Checking saved model…' : state === 'NOT_DOWNLOADED' ? 'Not downloaded' : state === 'DOWNLOADING' ? 'Downloading / loading' : state === 'FAILED' ? 'Download failed' : 'Ready'}</span></div>
     <p className="mt-3 text-sm leading-6 text-ink-300">Optional local rewrite using Qwen2.5 0.5B. The model file is 786 MB plus supporting files and needs a network download. Inference runs on your device in a worker; prompts are not sent to the model host. Speed and memory depend on your device.</p>
     {state === 'DOWNLOADING' && <div className="mt-3 text-xs text-ink-300">{progress ? <><div>Downloading {progress.file}: {Math.floor(progress.loaded / progress.total * 100)}% ({progress.loaded.toLocaleString()} / {progress.total.toLocaleString()} bytes)</div><progress className="mt-2 w-full accent-jade-400" max={progress.total} value={progress.loaded}/><div>Progress is for this file, not the complete model.</div></> : 'Preparing model files…'}</div>}
     {!checking && state !== 'DOWNLOADING' && (state === 'READY' ? <button type="button" disabled={busy || !prompt.trim()} onClick={rewrite} className="mt-4 rounded-lg bg-jade-400 px-5 py-3 text-sm font-semibold text-ink-950 disabled:opacity-40">{busy ? 'Rewriting…' : 'Rewrite'}</button> : <button type="button" onClick={enable} className="mt-4 rounded-lg bg-jade-400 px-5 py-3 text-sm font-semibold text-ink-950">{state === 'FAILED' ? 'Retry' : 'Enable'}</button>)}
+    {busy && <div className="mt-4 rounded-lg border border-ink-700 p-4" role="status">
+      <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-ink-200">AI rewriting · {elapsed} seconds elapsed</span><button type="button" onClick={cancel} className="rounded-md border border-ink-600 px-3 py-1.5 text-xs text-ink-100">Cancel rewrite</button></div>
+      <p className="mt-2 text-xs leading-5 text-ink-300">{partial ? 'Generating text locally. This draft is incomplete and has not been checked.' : 'Preparing the prompt; the first words may take time. The automatic cleanup X-Ray below is separate.'}</p>
+      {partial && <div className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-ink-950 p-3 text-sm text-ink-200">{partial}</div>}
+    </div>}
     {message && <p role="status" className="mt-3 text-sm leading-6 text-amber-400">{message}</p>}
     {review && <div className="mt-4 rounded-lg border border-amber-400/30 p-4">
       <h3 className="text-sm font-semibold text-amber-400">Review rejected rewrite</h3>
