@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { env, pipeline, type ProgressInfo } from '@huggingface/transformers';
+import { env, pipeline, TextStreamer, type ProgressInfo } from '@huggingface/transformers';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
 import wasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
 
@@ -37,10 +37,15 @@ self.onmessage = async (event: MessageEvent<{ type: 'load' | 'restore' | 'rewrit
       return;
     }
     if (!generator) throw new Error('The model is not ready.');
+    // Partial text is for progress only; apply only after validation.
+    const streamer = new TextStreamer(generator.tokenizer, {
+      skip_prompt: true,
+      callback_function: (text: string) => { if (text) self.postMessage({ type: 'chunk', text }); },
+    });
     const result = await generator([
       { role: 'system', content: 'Rewrite the user prompt for clarity and concision. Preserve every relevant detail, task, constraint and uncertainty. Do not answer the prompt or add facts, examples or instructions. If already clear, leave it unchanged. Output only the revised prompt.' },
       { role: 'user', content: event.data.prompt ?? '' },
-    ], { max_new_tokens: 512, do_sample: false, return_full_text: false });
+    ], { max_new_tokens: 512, do_sample: false, return_full_text: false, streamer });
     const first = result[0];
     const generated = first && !Array.isArray(first) ? first.generated_text : undefined;
     const output = typeof generated === 'string' ? generated : Array.isArray(generated) ? generated.at(-1)?.content : undefined;

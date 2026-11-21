@@ -64,3 +64,42 @@ it('offers an explicit review of a rejected constraint rewrite, without silently
   await act(async () => button.click());
   expect(apply).toHaveBeenCalledWith(candidate, original);
 });
+
+it('shows an unchecked streaming draft and discards stale output when the prompt changes', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const apply = vi.fn();
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: 'Explain bread.', source: 'Explain bread.', onApply: apply })));
+  const worker = FakeWorker.current;
+  await act(async () => worker.send({ type: 'ready' }));
+  await act(async () => host.querySelector('button')!.click());
+  await act(async () => worker.send({ type: 'chunk', text: 'Partial draft' }));
+  expect(host.textContent).toContain('Partial draft');
+  expect(host.textContent).toContain('incomplete and has not been checked');
+  expect(apply).not.toHaveBeenCalled();
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: 'Different input', source: 'Different input', onApply: apply })));
+  await act(async () => worker.send({ type: 'result', output: 'Explain bread.' }));
+  expect(host.textContent).toContain('outdated result was discarded');
+  expect(apply).not.toHaveBeenCalled();
+});
+
+it('cancels the active worker and reloads without applying a late result', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const apply = vi.fn();
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: 'Explain bread.', source: 'Explain bread.', onApply: apply })));
+  const worker = FakeWorker.current;
+  await act(async () => worker.send({ type: 'ready' }));
+  await act(async () => host.querySelector('button')!.click());
+  const cancel = [...host.querySelectorAll('button')].find(b => b.textContent?.includes('Cancel rewrite'))!;
+  await act(async () => cancel.click());
+  expect(worker.terminate).toHaveBeenCalled();
+  expect(FakeWorker.current).not.toBe(worker);
+  expect(FakeWorker.current.postMessage).toHaveBeenCalledWith({ type: 'restore' });
+  await act(async () => worker.send({ type: 'result', output: 'Explain bread.' }));
+  expect(apply).not.toHaveBeenCalled();
+});
