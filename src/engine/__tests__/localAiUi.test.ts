@@ -103,3 +103,37 @@ it('cancels the active worker and reloads without applying a late result', async
   await act(async () => worker.send({ type: 'result', output: 'Explain bread.' }));
   expect(apply).not.toHaveBeenCalled();
 });
+
+it('runs a real self-test request only when ready and displays the worker output without applying it', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const apply = vi.fn(); root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: '', source: '', onApply: apply })));
+  const worker = FakeWorker.current;
+  expect(host.textContent).not.toContain('Test AI model');
+  await act(async () => worker.send({ type: 'ready' }));
+  const test = [...host.querySelectorAll('button')].find(b => b.textContent === 'Test AI model')!;
+  await act(async () => test.click());
+  expect(worker.postMessage).toHaveBeenCalledWith({ type: 'self-test' });
+  expect(test.disabled).toBe(true);
+  expect(host.textContent).toContain('Testing AI model');
+  await act(async () => worker.send({ type: 'self-test-result', output: 'READY', elapsedMs: 1200 }));
+  expect(host.textContent).toContain('Model returned: READY');
+  expect(host.textContent).toContain('1200 ms');
+  expect(apply).not.toHaveBeenCalled();
+});
+
+it('shows an inference error without incorrectly reporting a failed download', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: '', source: '', onApply: vi.fn() })));
+  const worker = FakeWorker.current;
+  await act(async () => worker.send({ type: 'ready' }));
+  await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Test AI model')!.click());
+  await act(async () => worker.send({ type: 'error', operation: 'self-test', message: 'Inference failed' }));
+  expect(host.textContent).toContain('Inference failed');
+  expect(host.textContent).not.toContain('Download failed');
+});
