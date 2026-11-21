@@ -40,3 +40,27 @@ describe('local model status controls', () => {
     expect(apply).toHaveBeenCalledWith('Explain bread.', 'Explain bread.');
   });
 });
+
+it('offers an explicit review of a rejected constraint rewrite, without silently applying it', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const apply = vi.fn();
+  const original = "Make a website. Don't make it look like every other AI template.";
+  const candidate = 'Make a website with an original look.';
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: original, source: original, onApply: apply })));
+  const worker = FakeWorker.current;
+  await act(async () => worker.send({ type: 'ready' }));
+  await act(async () => host.querySelector('button')!.click());
+  await act(async () => worker.send({ type: 'result', output: candidate }));
+  expect(apply).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Review rejected rewrite');
+  expect(host.textContent).toContain(candidate);
+  const button = [...host.querySelectorAll('button')].find(b => b.textContent?.includes('Apply anyway'))!;
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: 'Different prompt', source: 'Different prompt', onApply: apply })));
+  expect(button.disabled).toBe(true);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: original, source: original, onApply: apply })));
+  await act(async () => button.click());
+  expect(apply).toHaveBeenCalledWith(candidate, original);
+});
