@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { env, pipeline, TextStreamer, type ProgressInfo } from '@huggingface/transformers';
+import { makeRewriteMessages } from './aiInstructions';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
 import wasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url';
 
@@ -46,10 +47,7 @@ self.onmessage = async (event: MessageEvent<{ type: 'load' | 'restore' | 'rewrit
     });
     const messages = isTest
       ? [{ role: 'user' as const, content: 'Reply with exactly this word: READY' }]
-      : [
-        { role: 'system' as const, content: 'Rewrite the user prompt for clarity and concision. Preserve every relevant detail, task, constraint and uncertainty. Do not answer the prompt or add facts, examples or instructions. If already clear, leave it unchanged. Output only the revised prompt.' },
-        { role: 'user' as const, content: event.data.prompt ?? '' },
-      ];
+      : makeRewriteMessages(event.data.prompt ?? '');
     const result = await generator(messages, { max_new_tokens: isTest ? 16 : 512, do_sample: false, return_full_text: false, streamer });
     const first = result[0];
     const generated = first && !Array.isArray(first) ? first.generated_text : undefined;

@@ -55,8 +55,8 @@ it('offers an explicit review of a rejected constraint rewrite, without silently
   await act(async () => host.querySelector('button')!.click());
   await act(async () => worker.send({ type: 'result', output: candidate }));
   expect(apply).not.toHaveBeenCalled();
-  expect(host.textContent).toContain('Review rejected rewrite');
-  expect(host.textContent).toContain(candidate);
+  expect(host.textContent).toContain('Review AI rewrite');
+  expect(host.querySelector<HTMLTextAreaElement>('#review-candidate')?.value).toBe(candidate);
   const button = [...host.querySelectorAll('button')].find(b => b.textContent?.includes('Apply anyway'))!;
   await act(async () => root!.render(createElement(BrowserAI, { prompt: 'Different prompt', source: 'Different prompt', onApply: apply })));
   expect(button.disabled).toBe(true);
@@ -136,4 +136,25 @@ it('shows an inference error without incorrectly reporting a failed download', a
   await act(async () => worker.send({ type: 'error', operation: 'self-test', message: 'Inference failed' }));
   expect(host.textContent).toContain('Inference failed');
   expect(host.textContent).not.toContain('Download failed');
+});
+
+it('lets the user repair a flagged draft and recheck it before applying', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('Worker', FakeWorker);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const apply = vi.fn(); const original = "Make a website. Don't make it look like every other AI template.";
+  root = createRoot(host);
+  await act(async () => root!.render(createElement(BrowserAI, { prompt: original, source: original, onApply: apply })));
+  const worker = FakeWorker.current;
+  await act(async () => worker.send({ type: 'ready' }));
+  await act(async () => host.querySelector('button')!.click());
+  await act(async () => worker.send({ type: 'result', output: 'Make a website with an original look.' }));
+  const recheck = [...host.querySelectorAll('button')].find(b => b.textContent === 'Recheck and apply')!;
+  await act(async () => recheck.click());
+  expect(apply).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Still needs review');
+  const textarea = host.querySelector<HTMLTextAreaElement>('#review-candidate')!;
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  await act(async () => { valueSetter.call(textarea, original); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => recheck.click());
+  expect(apply).toHaveBeenCalledWith(original, original);
 });

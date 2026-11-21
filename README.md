@@ -10,7 +10,7 @@ Transformers.js uses the browser Cache API, not a guaranteed permanent IndexedDB
 
 The production website uses a service worker to cache its static files, including model runtime assets as they are used. After the site, runtime and model are fully cached, they can work without a network connection; offline use depends on browser storage, prior successful caching and service-worker support. The browser extension bundles its runtime assets separately and maintains its own model cache.
 
-AI output is checked for recognized protected spans, numbers, constraints and basic structure; these checks are heuristic and **cannot prove semantic equivalence or detect all missing information**. Rejected AI outputs leave the prior result unchanged. Review every result before copying, particularly in high-stakes contexts. Model quality and output-token savings are not guaranteed. The fixed generation cap can result in incomplete output; review closely. The original text is never overwritten.
+The AI receives the original prompt and is instructed to preserve uncertainty, alternatives and negative requirements rather than choose on the user’s behalf. AI output is checked for recognized protected spans, numbers, constraints and basic structure; these checks are heuristic and **cannot prove semantic equivalence or detect all missing information**. Flagged AI outputs leave the prior result unchanged and can be reviewed and edited; wording checks can flag valid paraphrases. Review every result before copying, particularly in high-stakes contexts. Model quality and output-token savings are not guaranteed. The fixed generation cap can result in incomplete output; review closely. The original text is never overwritten.
 
 ## Local development
 

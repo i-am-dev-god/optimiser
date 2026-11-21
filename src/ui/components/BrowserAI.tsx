@@ -50,7 +50,7 @@ export function BrowserAI({ prompt, source, onApply }: { prompt: string; source:
           const reasons = validateAi(pending.current, m.output ?? '');
           if (reasons.length) {
             if (m.output?.trim()) setReview({ original: pending.current, candidate: m.output });
-            setMessage(`Rewrite not applied: ${reasons.join(' ')} The existing result is unchanged. Review the candidate below; the check may be detecting a real loss or a rewording.`);
+            setMessage(`Rewrite needs review: ${reasons.join(' ')} The existing result is unchanged. The check compares wording and cannot tell a safe rewording from a lost requirement.`);
             return;
           }
           onApply(m.output!, pending.current); setMessage('AI rewrite applied. Review it against your original; automatic checks cannot verify all meaning.');
@@ -95,14 +95,21 @@ export function BrowserAI({ prompt, source, onApply }: { prompt: string; source:
     </div>}
     {message && <p role="status" className="mt-3 text-sm leading-6 text-amber-400">{message}</p>}
     {review && <div className="mt-4 rounded-lg border border-amber-400/30 p-4">
-      <h3 className="text-sm font-semibold text-amber-400">Review rejected rewrite</h3>
-      <p className="mt-2 text-xs leading-5 text-ink-300">This candidate failed automatic checks. Compare it carefully with your original, especially the flagged constraint. Applying it overrides the checks and can lose important information.</p>
+      <h3 className="text-sm font-semibold text-amber-400">Review AI rewrite</h3>
+      <p className="mt-2 text-xs leading-5 text-ink-300">The check could not confirm one or more details. Compare the original and draft; edit the draft to restore anything missing, then recheck. A reworded constraint can also trigger this warning.</p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div><h4 className="mb-2 text-xs font-semibold text-ink-300">Original prompt</h4><div className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm leading-6">{review.original}</div></div>
-        <div><h4 className="mb-2 text-xs font-semibold text-ink-300">AI candidate — not applied</h4><div className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm leading-6">{review.candidate}</div></div>
+        <div><label htmlFor="review-candidate" className="mb-2 block text-xs font-semibold text-ink-300">AI draft — editable, not applied</label><textarea id="review-candidate" value={review.candidate} onChange={e => setReview({ ...review, candidate: e.target.value })} className="min-h-52 w-full resize-y rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm leading-6" /></div>
       </div>
       {review.original !== prompt && <p className="mt-3 text-xs text-amber-400">The input changed since this rewrite. Run Rewrite again to review the current prompt.</p>}
-      <button type="button" disabled={busy || review.original !== prompt} onClick={() => { onApply(review.candidate, review.original); setReview(null); setMessage('AI candidate applied by you despite failed checks. Review all details before copying.'); }} className="mt-4 rounded-lg border border-amber-400/50 px-4 py-2 text-sm font-medium text-amber-400 disabled:cursor-not-allowed disabled:opacity-40">Apply anyway after review</button>
+      <button type="button" disabled={busy || review.original !== prompt || !review.candidate.trim()} onClick={() => {
+        try {
+          const reasons = validateAi(review.original, review.candidate);
+          if (reasons.length) { setMessage(`Still needs review: ${reasons.join(' ')}`); return; }
+          onApply(review.candidate, review.original); setReview(null); setMessage('Edited draft passed the automatic checks. Review the full prompt before copying; checks cannot verify all meaning.');
+        } catch { setMessage('Could not check the draft. The existing result is unchanged.'); }
+      }} className="mt-4 rounded-lg bg-jade-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-40">Recheck and apply</button>
+      <button type="button" disabled={busy || review.original !== prompt || !review.candidate.trim()} onClick={() => { onApply(review.candidate, review.original); setReview(null); setMessage('AI candidate applied by you despite failed checks. Review all details before copying.'); }} className="ml-4 mt-4 rounded-lg border border-amber-400/50 px-4 py-2 text-sm font-medium text-amber-400 disabled:cursor-not-allowed disabled:opacity-40">Apply anyway after review</button>
       <button type="button" onClick={() => { setReview(null); setMessage('Rejected candidate discarded. The existing result is unchanged.'); }} className="ml-4 mt-4 text-sm text-ink-300 hover:text-ink-100">Discard</button>
     </div>}
     <p className="mt-3 text-xs leading-5 text-ink-300">Browser storage can be cleared or evicted, and interrupted downloads may restart. Model initialization can take time on later visits. AI can omit or alter meaning; compare before copying.</p>
