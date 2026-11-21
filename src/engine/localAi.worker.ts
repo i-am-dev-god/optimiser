@@ -29,7 +29,7 @@ async function load(localOnly: boolean) {
     },
   });
 }
-self.onmessage = async (event: MessageEvent<{ type: 'load' | 'restore' | 'rewrite'; prompt?: string }>) => {
+self.onmessage = async (event: MessageEvent<{ type: 'load' | 'restore' | 'rewrite' | 'self-test'; prompt?: string }>) => {
   try {
     if (event.data.type === 'load' || event.data.type === 'restore') {
       generator = await load(event.data.type === 'restore');
@@ -37,20 +37,27 @@ self.onmessage = async (event: MessageEvent<{ type: 'load' | 'restore' | 'rewrit
       return;
     }
     if (!generator) throw new Error('The model is not ready.');
+    const isTest = event.data.type === 'self-test';
+    const started = performance.now();
     // Partial text is for progress only; apply only after validation.
     const streamer = new TextStreamer(generator.tokenizer, {
       skip_prompt: true,
-      callback_function: (text: string) => { if (text) self.postMessage({ type: 'chunk', text }); },
+      callback_function: (text: string) => { if (text && !isTest) self.postMessage({ type: 'chunk', text }); },
     });
-    const result = await generator([
-      { role: 'system', content: 'Rewrite the user prompt for clarity and concision. Preserve every relevant detail, task, constraint and uncertainty. Do not answer the prompt or add facts, examples or instructions. If already clear, leave it unchanged. Output only the revised prompt.' },
-      { role: 'user', content: event.data.prompt ?? '' },
-    ], { max_new_tokens: 512, do_sample: false, return_full_text: false, streamer });
+    const messages = isTest
+      ? [{ role: 'user' as const, content: 'Reply with exactly this word: READY' }]
+      : [
+        { role: 'system' as const, content: 'Rewrite the user prompt for clarity and concision. Preserve every relevant detail, task, constraint and uncertainty. Do not answer the prompt or add facts, examples or instructions. If already clear, leave it unchanged. Output only the revised prompt.' },
+        { role: 'user' as const, content: event.data.prompt ?? '' },
+      ];
+    const result = await generator(messages, { max_new_tokens: isTest ? 16 : 512, do_sample: false, return_full_text: false, streamer });
     const first = result[0];
     const generated = first && !Array.isArray(first) ? first.generated_text : undefined;
     const output = typeof generated === 'string' ? generated : Array.isArray(generated) ? generated.at(-1)?.content : undefined;
     if (typeof output !== 'string' || !output.trim()) throw new Error('The model returned an empty response.');
-    self.postMessage({ type: 'result', output: output.trim() });
+    self.postMessage(isTest
+      ? { type: 'self-test-result', output: output.trim(), elapsedMs: Math.round(performance.now() - started) }
+      : { type: 'result', output: output.trim() });
   } catch (error) {
     self.postMessage({ type: event.data.type === 'restore' ? 'not-cached' : 'error', operation: event.data.type, message: error instanceof Error ? error.message : 'Local model failed.' });
   }
