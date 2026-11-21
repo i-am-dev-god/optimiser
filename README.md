@@ -1,25 +1,34 @@
-# optimiser
+# Optimiser
 
-A browser prompt-refinement workbench with two explicitly separate modes:
+A client-side prompt workbench. Text cleanup runs automatically. Optional AI rewriting uses Qwen2.5 0.5B Instruct q4 with Transformers.js and ONNX Runtime WASM in a dedicated worker. No account, API key, inference server, or user database is required.
 
-- **Rule-based optimizer:** deterministic cleanup and checks; it does not call an AI model. The model selector changes token accounting assumptions, not the engine. The UI does not add optional response-shaping directives.
-- **Browser AI rewrite:** calls the browser's built-in Prompt API language model, when available. It sends your prompt to that model on your device. The browser may need to download model files. Availability depends on browser version, device, configuration, and model support; the app reports unavailable rather than pretending inference occurred. The model used is determined by the browser, not the accounting selector.
+## AI setup and privacy
 
-To test AI: open the site in a compatible browser with the Prompt API enabled, paste a prompt, check the Browser AI status, and click **Rewrite with browser AI**. A result appears only after the model's `prompt()` call returns. Compare it against the original; a successful call or a changed output does not prove semantic accuracy. An unchanged result can also be a valid rewrite. Unsupported browsers can use the clearly labeled rules mode, but cannot run AI through this feature.
+Click **Enable** to fetch the pinned model from Hugging Face; the q4 ONNX file alone is listed as 786 MB, plus tokenizer, runtime and other files. Progress is the current file's byte progress, not an invented overall percentage. Only after the worker has loaded the model does **Rewrite** become available. Inference occurs on-device; prompts are not sent to the model host. The hosting site, runtime files and model weights are network downloads, and the model host can observe downloads and IP addresses.
 
-## Run locally
+Transformers.js uses the browser Cache API, not a guaranteed permanent IndexedDB download. On a later visit the worker tries to initialize using cached files only. Storage may be denied, cleared, or evicted, initialization takes time and interrupted transfers may restart. Devices and browsers differ in WASM, memory and storage support; failure can be retried and does not prevent automatic cleanup. No fixed load time, file size for the complete download, or universal browser support is promised.
 
-Requires Node.js 20.19+ or 22.12+ (Vite 8).
+The production website uses a service worker to cache its static files, including model runtime assets as they are used. After the site, runtime and model are fully cached, they can work without a network connection; offline use depends on browser storage, prior successful caching and service-worker support. The browser extension bundles its runtime assets separately and maintains its own model cache.
+
+AI output is checked for recognized protected spans, numbers, constraints and basic structure; these checks are heuristic and **cannot prove semantic equivalence or detect all missing information**. Rejected AI outputs leave the prior result unchanged. Review every result before copying, particularly in high-stakes contexts. Model quality and output-token savings are not guaranteed. The fixed generation cap can result in incomplete output; review closely. The original text is never overwritten.
+
+## Local development
+
+Requires Node.js 20.19+ or 22.12+.
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run dev
+npm test
+npm run build
 ```
 
-`npm test` runs the engine and integration tests. The browser AI integration tests use a mock; they do not verify real model availability, quality, or inference. `npm run build` type-checks and builds the production site. GitHub Actions builds and deploys to Pages when configured for GitHub Actions.
+`--ignore-scripts` avoids downloading native Node inference dependencies; this project runs inference in the browser. The tests cover deterministic logic and AI validation, not a real Qwen model run. Actual inference must be tested on a supported browser/device with enough storage and a network connection to the model host. The built website is static and deploys with the GitHub Pages workflow.
 
-## Accuracy and limits
+## Optional Chrome extension
 
-Rule-based processing uses a vault, heuristic scanning and reversible transforms with verification checks and fallbacks. It cannot guarantee semantic equivalence, recognize every constraint, or adapt perfectly to outliers. AI rewriting is also fallible and is not covered by those rule-based checks. Always compare the output to the original, especially for consequential work.
+`npm run build:extension` creates an unpacked Manifest V3 extension in `extension-dist/`. In Chrome open `chrome://extensions`, enable Developer mode and choose **Load unpacked**. Click its toolbar icon to open the side panel, or select text on a page and choose **Optimise selected text** from the context menu. It uses `contextMenus`, `sidePanel` and session storage permissions; the selected text is placed in the side panel only on explicit action. Model host permissions allow optional downloads. The extension does not modify site text, and is not guaranteed to work on every browser or restricted page. It is not published to an extension store; real-browser extension/model compatibility requires testing.
 
-Token counts use the named BPE encoder on prompt text only, excluding message framing and model responses. OpenAI selections use matching encoders; other models use clearly labeled proxies. Inputs over 200,000 characters are rejected rather than silently truncated. Prices in `src/engine/pricing.ts` are dated assumptions, not live quotes. Break-even numbers are conditional arithmetic, not predicted savings; context-sensitive tokenization can change marginal cost. AI inference cost or savings are not measured.
+## Measurements
+
+Token counts are for prompt text only using the named BPE encoder, not message framing or the Qwen model tokenizer. The original prompt is rejected if it exceeds the tokenizer limit rather than silently truncating. Cleanup and validation use rules and fixed parameters; they do not handle every outlier perfectly. No model quality or financial savings are predicted.

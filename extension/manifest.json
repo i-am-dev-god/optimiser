@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Optimiser – local prompt rewrite",
+  "version": "0.2.0",
+  "description": "Refine selected text in a local side panel.",
+  "permissions": ["contextMenus", "sidePanel", "storage"],
+  "host_permissions": ["https://huggingface.co/*", "https://*.hf.co/*", "https://*.huggingface.co/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Open Optimiser" },
+  "side_panel": { "default_path": "index.html" },
+  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" }
+}

@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/build-service-worker.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false"
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false",
+    "build:extension": "npm run build && node scripts/build-extension.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "gpt-tokenizer": "^4.1.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

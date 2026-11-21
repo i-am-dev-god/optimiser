@@ -11,3 +11,11 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+
+// Only the hosted site registers a service worker; extension pages use their
+// own bundled assets. First install and model downloads still require network.
+if (import.meta.env.PROD && /^https?:$/.test(window.location.protocol) && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {
+    // The app remains usable online when the browser blocks service workers.
+  });
+}
