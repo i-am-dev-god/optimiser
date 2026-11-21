@@ -1,32 +1,48 @@
-import { useEffect, useState } from 'react';
-import { browserModel, checkBrowserAi, rewriteWithBrowserAi } from '../../engine/browserAi';
-import { diffWords } from '../lib/diff';
+import { useEffect, useRef, useState } from 'react';
+import { validateAi } from '../../engine/validateAi';
 
-export function BrowserAI({ prompt }: { prompt: string }) {
-  const [availability, setAvailability] = useState('checking');
+type State = 'NOT_DOWNLOADED' | 'DOWNLOADING' | 'FAILED' | 'READY';
+type Message = { type: 'ready' | 'not-cached' | 'error' | 'progress' | 'result'; operation?: string; message?: string; file?: string; loaded?: number; total?: number; output?: string };
+export function BrowserAI({ prompt, source, onApply }: { prompt: string; source: string; onApply: (output: string, original: string) => void }) {
+  const worker = useRef<Worker | null>(null);
+  const pending = useRef('');
+  const [state, setState] = useState<State>('NOT_DOWNLOADED');
+  const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [original, setOriginal] = useState('');
-  const [output, setOutput] = useState('');
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
-  useEffect(() => { let live = true; checkBrowserAi().then(s => { if (live) setAvailability(s); }).catch(() => { if (live) setAvailability('error'); }); return () => { live = false; }; }, []);
-  async function run() {
-    if (!prompt.trim()) { setError('Enter a prompt first.'); return; }
-    const input = prompt;
-    setBusy(true); setError(''); setCopied(false);
-    try { const answer = await rewriteWithBrowserAi(input); setOriginal(input); setOutput(answer); setAvailability('available'); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Model failed to run.'); }
-    finally { setBusy(false); }
-  }
-  async function copy() { try { await navigator.clipboard.writeText(output); setCopied(true); } catch { setError('Clipboard unavailable. Select and copy the result manually.'); } }
-  const available = !['checking', 'unsupported', 'unavailable', 'error'].includes(availability) && !!browserModel();
+  const [progress, setProgress] = useState<{ file: string; loaded: number; total: number } | null>(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    let w: Worker;
+    try { w = new Worker(new URL('../../engine/localAi.worker.ts', import.meta.url), { type: 'module' }); }
+    catch { setChecking(false); setState('FAILED'); setMessage('This browser could not start a model worker.'); return; }
+    worker.current = w;
+    w.onmessage = (event: MessageEvent<Message>) => {
+      const m = event.data;
+      if (m.type === 'ready') { setState('READY'); setChecking(false); setProgress(null); setMessage(''); }
+      if (m.type === 'not-cached') { setState('NOT_DOWNLOADED'); setChecking(false); }
+      if (m.type === 'progress' && m.file && m.total && m.loaded !== undefined) setProgress({ file: m.file, total: m.total, loaded: m.loaded });
+      if (m.type === 'error') { setChecking(false); setBusy(false); if (m.operation !== 'rewrite') setState('FAILED'); setMessage(m.message || 'Local AI failed.'); }
+      if (m.type === 'result') {
+        setBusy(false);
+        try {
+          const reasons = validateAi(pending.current, m.output ?? '');
+          if (reasons.length) { setMessage(`Rewrite not applied: ${reasons.join(' ')} The existing result is unchanged.`); return; }
+          onApply(m.output!, pending.current); setMessage('AI rewrite applied. Review it against your original; automatic checks cannot verify all meaning.');
+        } catch { setMessage('Could not validate the AI rewrite. The existing result is unchanged.'); }
+      }
+    };
+    w.onerror = () => { setChecking(false); setBusy(false); setState('FAILED'); setMessage('The model worker stopped. Reload the page to retry.'); worker.current = null; w.terminate(); };
+    w.postMessage({ type: 'restore' });
+    return () => { worker.current = null; w.terminate(); };
+  }, [onApply]);
+  const enable = () => { if (!worker.current) { window.location.reload(); return; } setState('DOWNLOADING'); setMessage(''); setProgress(null); worker.current.postMessage({ type: 'load' }); };
+  const rewrite = () => { if (state !== 'READY' || busy || !prompt.trim() || !worker.current) return; pending.current = prompt; setBusy(true); setMessage(''); worker.current.postMessage({ type: 'rewrite', prompt: source }); };
   return <section className="panel mt-5 p-5 sm:p-6" aria-labelledby="ai-title">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-medium uppercase tracking-widest text-jade-400">Actual model inference</div><h2 id="ai-title" className="mt-1 text-xl font-semibold">Browser AI rewrite</h2></div><span className="chip">Model: {availability}</span></div>
-    <p className="mt-3 text-sm leading-6 text-ink-300">This mode calls your browser’s built-in language model, if supported. The target-model selector above is only for token accounting and does not select this model. Your prompt stays on your device; your browser may need to download model files first.</p>
-    {!available && <p role="status" className="mt-3 rounded-lg border border-amber-400/30 p-3 text-sm text-amber-400">{availability === 'checking' ? 'Checking browser model availability…' : 'Browser AI is unavailable here. A compatible browser, supported device, enabled Prompt API and a downloaded model are required. No AI rewrite has run; the rule-based optimizer above remains separate.'}</p>}
-    {available && <p className="mt-3 text-xs text-ink-300">{availability === 'available' ? 'Model is ready. Run a rewrite to verify inference.' : 'Model setup or download may be required when you run it.'}</p>}
-    <button type="button" disabled={!available || busy} onClick={run} className="mt-4 rounded-lg bg-jade-400 px-5 py-3 text-sm font-semibold text-ink-950 disabled:cursor-not-allowed disabled:opacity-40">{busy ? 'Running model…' : 'Rewrite with browser AI'}</button>
-    {error && <p role="alert" className="mt-3 text-sm text-rose-400">{error}</p>}
-    {output && <div className="mt-5"><div className="flex justify-between gap-3"><h3 className="text-sm font-semibold">AI output {original === output && <span className="text-ink-300">· unchanged</span>}</h3><button onClick={copy} className="text-sm text-jade-400">{copied ? 'Copied' : 'Copy'}</button></div>{original !== prompt && <p className="mt-2 text-sm text-amber-400">Input changed since this result was generated.</p>}<div className="mt-3 whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 p-4 text-sm leading-7">{output}</div><details className="mt-4"><summary className="cursor-pointer text-sm text-ink-200">Compare with original</summary><div className="mt-3 whitespace-pre-wrap break-words text-sm leading-7">{diffWords(original, output).map((part, i) => <span key={i} className={part.kind === 'add' ? 'bg-jade-500/20 text-jade-400' : part.kind === 'del' ? 'bg-rose-400/10 text-rose-400 line-through' : ''}>{part.text}</span>)}</div></details><p className="mt-4 text-xs leading-5 text-amber-400">Model inference completed, but that does not prove the rewrite is correct. AI can omit details or add instructions. Compare it with the original before use. No AI cost or output savings are claimed.</p></div>}
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="ai-title" className="font-semibold">AI Rewrite</h2><span className="chip" role="status">{checking ? 'Checking saved model…' : state === 'NOT_DOWNLOADED' ? 'Not downloaded' : state === 'DOWNLOADING' ? 'Downloading / loading' : state === 'FAILED' ? 'Download failed' : 'Ready'}</span></div>
+    <p className="mt-3 text-sm leading-6 text-ink-300">Optional local rewrite using Qwen2.5 0.5B. The model file is 786 MB plus supporting files and needs a network download. Inference runs on your device in a worker; prompts are not sent to the model host. Speed and memory depend on your device.</p>
+    {state === 'DOWNLOADING' && <div className="mt-3 text-xs text-ink-300">{progress ? <><div>Downloading {progress.file}: {Math.floor(progress.loaded / progress.total * 100)}% ({progress.loaded.toLocaleString()} / {progress.total.toLocaleString()} bytes)</div><progress className="mt-2 w-full accent-jade-400" max={progress.total} value={progress.loaded}/><div>Progress is for this file, not the complete model.</div></> : 'Preparing model files…'}</div>}
+    {!checking && state !== 'DOWNLOADING' && (state === 'READY' ? <button type="button" disabled={busy || !prompt.trim()} onClick={rewrite} className="mt-4 rounded-lg bg-jade-400 px-5 py-3 text-sm font-semibold text-ink-950 disabled:opacity-40">{busy ? 'Rewriting…' : 'Rewrite'}</button> : <button type="button" onClick={enable} className="mt-4 rounded-lg bg-jade-400 px-5 py-3 text-sm font-semibold text-ink-950">{state === 'FAILED' ? 'Retry' : 'Enable'}</button>)}
+    {message && <p role="status" className="mt-3 text-sm leading-6 text-amber-400">{message}</p>}
+    <p className="mt-3 text-xs leading-5 text-ink-300">Browser storage can be cleared or evicted, and interrupted downloads may restart. Model initialization can take time on later visits. AI can omit or alter meaning; compare before copying.</p>
   </section>;
 }
